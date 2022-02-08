@@ -5,13 +5,11 @@
 '''
 
 from copy import deepcopy
-from gettext import find
 from tkinter import W
 import click
 
 from itertools import chain, combinations
-from time import sleep
-from math import comb, e, pow
+from math import comb, e, pow, log
 from random import randrange, choice, random
 
 
@@ -73,50 +71,57 @@ def choose_method(method):
         brute_force(configs[0], configs[1], m, k)
     if method == "anneal":
         sorted_keys = sorted(sorted(configs[0].keys(), key = lambda i: i[len(i) - 1]), key = lambda i: i[:-1])
-        anneal(configs[0], configs[1], m=m, K=k, T=k)
+        anneal(configs[0], configs[1], sorted_keys, m=m, K=k, T=k)
 
 
 def gen_configs(m):
     return (  gen_umat(m), gen_combos(m) )
 
-def anneal(umat, keys, m, its=1000, T=4, r=.95, K=4):
+def anneal(umat, combos, keys, m, its=1000, T=100000, r=.90, K=3, d = 40):
+
     shift_len = find_shift_len(m)
     coloring = gen_random_coloring(shift_len)
     apply_str_coloring(umat, keys, coloring)
     training_umat = deepcopy(umat)
 
-    for i in range(its):
-        current_fitness = fitness(umat, coloring, K)
+    t = 1
 
-        if current_fitness <= K:
-            click.secho(f"YOU FOUND IT : ", fg="green")
+    for i in range(its):
+        current_fitness = fitness(umat, combos, K)
+
+        if current_fitness == 0:
+            click.secho(f"YOU FOUND IT : ", fg="green", bg="white")
             click.secho(f"{ umat }")
             return
 
-        next_coloring = mut(coloring, shift_len, dist = round(T))
-        apply_coloring(training_umat, keys, Number(), shift_len)
-        next_fitness = fitness(training_umat, next_coloring, K)
+        next_coloring = mut(coloring, shift_len, dist = 3)
+        num = Number()
+        num.val = int("".join(list_cast(next_coloring, str)), 2)
+        apply_coloring(training_umat, keys, num, shift_len)
+        next_fitness = fitness(training_umat, combos, K)
+        print(current_fitness)
+
+
 
         delta = next_fitness - current_fitness
         
-        if delta < 0:
-            pass
-        else:
+        if delta < 0: # the solution we found is better, so we take the transition
+            umat = training_umat
+        else: # the solution we found was at least even, so we take our chances
             power = delta / T
-            prob = pow(e, power)
+            prob = pow(e, -power)
             umat = umat if random() > prob else training_umat
-            
-        T *= r
+        t += 1
+        T = d / log(e, t) 
 
 
 
 def brute_force(umat, combos, m, k):
     combos = gen_combos(m)
-    print(combos)
     umat = gen_umat(m) 
     sorted_key_list = sorted(umat.keys(), key=len) # doesn't matter what order we assign the keys in as
                                                    # long as it's the same order every time
-    shift_len = (m - 1) * m / 2 + 1 # number of cells in the umat
+    shift_len = (m - 1) * m / 2 - 1 # number of cells in the umat
     print(shift_len)
 
     counter = Number()
@@ -127,16 +132,22 @@ def brute_force(umat, combos, m, k):
             print(f"There are no unicolored sets of size {k} on :  \n {umat}")
 
 def find_shift_len(m):
-    return (m - 1) * m / 2 + 1
+    return (m - 1) * m / 2 
 
-def mut(coloring, shift_len, dist: int =1): # select dist random points and invert them
+def mut(coloring, shift_len, dist: int = 3): # select dist random points and invert them
     coloring = list(coloring)
-    for i in range(dist + 1):
-        select = 1 << randrange(1, shift_len)
-        coloring[select] = str(~ int(coloring[select]))
-    return str(coloring)
-    
+    for i in range(dist):
+        select = int(randrange( 1, shift_len ))
+        coloring[select] = 1 if int(coloring[select] == 0) else 0
 
+    return coloring
+
+def list_cast(list, _type):
+    for i, v in enumerate(list):
+        list[i] = _type(list[i])
+    return list
+
+        
 def gen_random_coloring(shift_len):
     coloring = ""
     for i in range(int(shift_len)):
@@ -186,7 +197,7 @@ def find_start_end(combos, k) -> tuple:
     end: int
     start_found: bool = False
     for i in range(len(combos)):
-        if not start_found and len(combos[i]) == k:
+        if len(combos[i]) == k and not start_found:
             start = i
             start_found = True
         if len(combos[i]) == k + 1:
@@ -206,8 +217,6 @@ def fitness(umat, combos, k) -> int: # similar to check combo but returns the
                 try:
                     sum += umat[first,second]
                 except KeyError as ke:
-                    print(umat)
-                    print(ke)
                     raise Exception
         if sum in uni_sums:
             score += 1 
